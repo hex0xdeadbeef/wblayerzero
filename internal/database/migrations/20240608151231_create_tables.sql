@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS items (
 
 	chrt_id INT NOT NULL,
 	nm_id INT NOT NULL,
-    rid VARCHAR NOT NULL,
+    rid INT NOT NULL,
 
 	brand VARCHAR NOT NULL,
     name VARCHAR NOT NULL,
