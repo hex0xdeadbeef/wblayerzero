@@ -1,5 +1,7 @@
 package entities
 
+import "time"
+
 type (
 	Order struct {
 		UID         string `json:"order_uid"`
@@ -12,7 +14,7 @@ type (
 		CustomerID      string `json:"customer_id"`
 		DeliveryService string `json:"delivery_service"`
 
-		DateCreated string `json:"date_created"`
+		DateCreated time.Time `json:"date_created"`
 
 		ShardKey int `json:"shardkey"`
 		SmID     int `json:"sm_id"`

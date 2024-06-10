@@ -1,7 +1,7 @@
 package app
 
 import (
-	"log"
+	"fmt"
 	"wblayerzero/internal/config"
 	"wblayerzero/internal/database/postgres"
 )
@@ -14,19 +14,42 @@ func Run() error {
 
 	storage, err := postgres.New(nil)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	defer func() {
-		if err := storage.Close(); err != nil {
-			log.Fatal(err)
+		storageCloseErr := storage.Close()
+		if storageCloseErr == nil {
+			return
 		}
+
+		err = storageCloseErr
 	}()
 
-	return nil
+	// orders := generateOrders(100)
+	// for _, order := range orders {
+	// 	if err := storage.InsertOrder(order); err != nil {
+	// 		return err
+	// 	}
+	// }
+
+	// orders, err := storage.GetAllOrders()
+	// if err != nil {
+	// 	return err
+	// }
+
+	orders, err := storage.GetAllOrders()
+	if err != nil {
+		return err
+	}
+
+	for _, o := range orders {
+		fmt.Println(o)
+	}
+
+	return err
 }
 
-/*
-// generateRandomString создает случайную строку указанной длины
+/* // generateRandomString создает случайную строку указанной длины
 func generateRandomString(length int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	seededRand := rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -50,7 +73,7 @@ func generateOrders(count int) []entities.Order {
 			InternalSignature: fmt.Sprintf("signature%d", i+1),
 			CustomerID:        fmt.Sprintf("customer%d", i+1),
 			DeliveryService:   fmt.Sprintf("delivery%d", i+1),
-			DateCreated:       time.Now().Format(time.RFC3339),
+			DateCreated:       time.Now(),
 			ShardKey:          i + 1,
 			SmID:              i + 2,
 			OffShard:          i + 3,
@@ -97,4 +120,4 @@ func generateOrders(count int) []entities.Order {
 	}
 	return orders
 }
-**/
+*/

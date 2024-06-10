@@ -9,12 +9,13 @@ import (
 )
 
 type (
-	Key string
-
 	OrderCache struct {
-		m      *sync.Map
+		m *sync.Map
+
 		logger *log.Logger
 	}
+
+	Key string
 )
 
 // New returns a new initialized OrderCache instance with the given logger
@@ -29,27 +30,40 @@ func (oc *OrderCache) Upload(orders ...entities.Order) error {
 	}
 
 	for _, order := range orders {
-		oc.m.Store(Key(order.UID), order)
+		oc.m.Store(Key(order.UID), &order)
 	}
 
 	return nil
 }
 
-// Get returns the order with a given orderUID
-func (oc *OrderCache) Get(orderUID string) (entities.Order, error) {
+// GetOne returns the order with a given orderUID
+// Method doesn't include any checks of type upcasting, because the Upload completes all the checks needed while dumping elems into cache
+func (oc *OrderCache) GetSingle(orderUID string) (*entities.Order, error) {
 	preOrder, ok := oc.m.Load(Key(orderUID))
 	if !ok {
-		return entities.Order{}, fmt.Errorf("order not found for the key %q", orderUID)
+		return nil, fmt.Errorf("order not found for the key %q", orderUID)
 	}
 
-	v := preOrder.(entities.Order)
-	return v, nil
+	return preOrder.(*entities.Order), nil
 }
 
-// DownloadOrders prints all the orders from the internal m
-func (oc *OrderCache) DownloadOrders() {
+// GetAll returns all the orders included within oc
+// You mustn't count on consistency of the internal m
+func (oc *OrderCache) GetAll() []*entities.Order {
+	const (
+		defaultStartSize = 1 << 6
+	)
+
+	var (
+		orders []*entities.Order
+	)
+
+	orders = make([]*entities.Order, defaultStartSize)
+
 	oc.m.Range(func(key, value any) bool {
-		fmt.Println(key.(Key), value.(entities.Order))
+		orders = append(orders, value.(*entities.Order))
 		return true
 	})
+
+	return orders
 }

@@ -1,7 +1,6 @@
 package postgres
 
 import (
-	"database/sql"
 	"fmt"
 	"log"
 
@@ -66,7 +65,7 @@ func (db *Database) InsertOrder(order entities.Order) error {
 		}
 	)
 
-	tx, err := db.db.Begin()
+	tx, err := db.db.Beginx()
 	if err != nil {
 		return fmt.Errorf("starting a new tx: %w", err)
 	}
@@ -154,14 +153,102 @@ func (db *Database) InsertOrder(order entities.Order) error {
 }
 
 // GetAllOrders finds all the orders in DB and returns it if any orders found (otherwise the firs param will be nil) and error if any
-func (db *Database) GetAllOrders() ([]entities.Order, error) {
+func (db *Database) GetAllOrders() (res []entities.Order, err error) {
+	tx, err := db.db.Beginx()
+	if err != nil {
+		return nil, fmt.Errorf("starting a new tx: %w", err)
+	}
 
-	return nil, nil
+	const (
+		query = `
+		SELECT
+			o.order_uid, o.track_number, o.entry, o.locale, o.internal_signature,
+			o.customer_id, o.delivery_service, o.date_created, o.shardkey, o.sm_id, o.oof_shard,
+			i.order_uid as item_order_uid, i.track_number as item_track_number, i.status as item_status,
+			i.chrt_id as item_chrt_id, i.nm_id as item_nm_id, i.rid as item_rid,
+			i.brand as item_brand, i.name as item_name, i.size as item_size,
+			i.price as item_price, i.sale as item_sale, i.total_price as item_total_price,
+			p.order_uid as payment_order_uid, p.transaction_id, p.request_id, p.bank, p.currency,
+			p.provider, p.payment_dt, p.amount, p.delivery_cost, p.goods_total, p.custom_fee,
+			d.order_uid as delivery_order_uid, d.zip, d.name, d.phone, d.email,
+			d.city, d.address, d.region
+		FROM orders o, items i, payments p, deliveries d
+		WHERE o.order_uid = i.order_uid
+		  AND o.order_uid = p.order_uid
+		  AND o.order_uid = d.order_uid;
+	`
+		startSize = 1 << 8
+	)
+
+	rows, err := tx.Queryx(query)
+	if err != nil {
+		return nil, wrapTxError(tx, "getting all orders", err)
+	}
+	defer func() {
+		rowsCloseErr := rows.Close()
+		if rowsCloseErr == nil {
+			return
+		}
+
+		if err != nil {
+			err = fmt.Errorf("%w; closing rows: %w", err, rowsCloseErr)
+		}
+		err = rowsCloseErr
+	}()
+
+	var (
+		ordersMap = make(map[string]entities.Order, startSize)
+
+		curOrder    entities.Order
+		curItem     entities.Item
+		curPayment  entities.Payment
+		curDelivery entities.Delivery
+	)
+	for rows.Next() {
+		if err = rows.Scan(
+			&curOrder.UID, &curOrder.TrackNumber, &curOrder.Entry, &curOrder.Locale, &curOrder.InternalSignature, &curOrder.CustomerID, &curOrder.DeliveryService,
+			&curOrder.DateCreated, &curOrder.ShardKey, &curOrder.SmID, &curOrder.OffShard,
+
+			&curItem.OrderUID, &curItem.TrackNumber, &curItem.Status, &curItem.ChrtID, &curItem.NmID, &curItem.RID, &curItem.Brand, &curItem.Name, &curItem.Size,
+			&curItem.Price, &curItem.Sale, &curItem.TotalPrice,
+
+			&curPayment.OrderUID, &curPayment.TxID, &curPayment.RequestID, &curPayment.Bank, &curPayment.Currency, &curPayment.Provider, &curPayment.PaymentDt,
+			&curPayment.Amount, &curPayment.DeliveryCost, &curPayment.GoodsTotal, &curPayment.CustomFee,
+
+			&curDelivery.OrderUID, &curDelivery.Zip, &curDelivery.Name, &curDelivery.Phone, &curDelivery.Email,
+			&curDelivery.City, &curDelivery.Address, &curDelivery.Region); err != nil {
+			return nil, wrapTxError(tx, "scanning row into struct", err)
+		}
+
+		presentedOrder, ok := ordersMap[curOrder.UID]
+		if ok {
+			presentedOrder.Items = append(presentedOrder.Items, curItem)
+			continue
+		}
+
+		curOrder.Items, curOrder.Payment, curOrder.Delivery = append(curOrder.Items, curItem), curPayment, curDelivery
+		ordersMap[curOrder.UID] = curOrder
+
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrapTxError(tx, "after rows scanning: %w", err)
+	}
+
+	if err = tx.Commit(); err != nil {
+		return nil, wrapTxError(tx, "committing tx:", err)
+	}
+
+	res = make([]entities.Order, 0, len(ordersMap))
+	for _, v := range ordersMap {
+		res = append(res, v)
+	}
+
+	return res, nil
 }
 
 // prepareAndExecStmt prepares a stmt with the query param and if everyrhing is okay executes it (otherwise returns a wrapped error)
 // returns an error if any
-func prepareAndExecStmt(tx *sql.Tx, query string, args ...any) error {
+func prepareAndExecStmt(tx *sqlx.Tx, query string, args ...any) error {
 	stmt, err := tx.Prepare(query)
 	if err != nil {
 		return wrapTxError(tx, "preparing stmt:", err)
@@ -176,7 +263,7 @@ func prepareAndExecStmt(tx *sql.Tx, query string, args ...any) error {
 
 // wrapTxError tries to close the tx and if it's been closed successfully returns only the formatted subError with subErrMsgF,
 // otherwise returns a chain of error where both an closing error tx and subError are presented
-func wrapTxError(tx *sql.Tx, subErrMsgF string, subError error) error {
+func wrapTxError(tx *sqlx.Tx, subErrMsgF string, subError error) error {
 	if rollbackErr := tx.Rollback(); rollbackErr != nil {
 		return fmt.Errorf("%s: %w; during rollback: %w", subErrMsgF, subError, rollbackErr)
 	}
